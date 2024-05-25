@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebSocket Chat</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #f06, #4a90e2);
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            color: rgb(53, 52, 51);
+        }
+        #container {
+            width: 400px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            animation: fadeIn 1s ease-in-out;
+        }
+        #login, #chatWindow {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        #login input, #login button, #chatWindow input, #chatWindow button {
+            width: 80%;
+            padding: 10px;
+            margin: 10px 0;
+            border: none;
+            border-radius: 5px;
+            box-shadow: 0 3px 6px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s;
+        }
+        #login input:focus, #chatWindow input:focus {
+            outline: none;
+            transform: scale(1.05);
+        }
+        #login button, #chatWindow button {
+            background: linear-gradient(135deg, #6f86d6, #48c6ef);
+            color: white;
+            cursor: pointer;
+        }
+        #login button:hover, #chatWindow button:hover {
+            background: linear-gradient(135deg, #48c6ef, #6f86d6);
+        }
+        #chat {
+            width: 100%;
+            height: 300px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background: rgba(255, 255, 255, 0.9);
+            overflow-y: scroll;
+            margin-bottom: 10px;
+        }
+        #chatWindow {
+            display: none;
+        }
+        .message {
+            background: #48c6ef;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 5px 0;
+            animation: slideIn 0.3s ease-in-out;
+        }
+        .notification {
+            font-style: italic;
+            margin: 5px 0;
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+        @keyframes slideIn {
+            from {
+                transform: translateX(-50%);
+            }
+            to {
+                transform: translateX(0);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="login">
+            <input type="text" id="username" placeholder="Enter your name">
+            <button id="join">Join Chat</button>
+        </div>
+        <div id="chatWindow">
+            <select id="users">
+                <option value="" disabled selected>Select a user</option>
+            </select>
+            <div id="chat"></div>
+            <input type="text" id="message" placeholder="Enter your message">
+            <button id="send">Send</button>
+        </div>
+    </div>
+
+    <script>
+        const chat = document.getElementById('chat');
+        const messageInput = document.getElementById('message');
+        const sendButton = document.getElementById('send');
+        const loginDiv = document.getElementById('login');
+        const chatWindow = document.getElementById('chatWindow');
+        const usernameInput = document.getElementById('username');
+        const joinButton = document.getElementById('join');
+        const usersSelect = document.getElementById('users');
+
+        let socket;
+        let currentRecipient = '';
+        let userName = '';
+
+        joinButton.onclick = () => {
+            userName = usernameInput.value.trim();
+            if (userName) {
+                socket = new WebSocket('ws://localhost:8080');
+
+                socket.onopen = () => {
+                    socket.send(JSON.stringify({ type: 'login', name: userName }));
+                };
+
+                socket.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+
+                    if (data.type === 'login') {
+                        if (data.success) {
+                            loginDiv.style.display = 'none';
+                            chatWindow.style.display = 'flex';
+                            updateUsers(data.users);
+                        } else {
+                            alert(data.message);
+                        }
+                    } else if (data.type === 'notification') {
+                        const notification = document.createElement('div');
+                        notification.className = 'notification';
+                        notification.textContent = data.message;
+                        chat.appendChild(notification);
+                        updateUsers(data.users);
+                    } else if (data.type === 'message') {
+                        const message = document.createElement('div');
+                        message.className = 'message';
+                        message.textContent = `${data.name}: ${data.message}`;
+                        chat.appendChild(message);
+                    } else if (data.type === 'history') {
+                        displayChatHistory(data.messages);
+                    }
+                };
+
+                socket.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                };
+
+                socket.onclose = () => {
+                    console.log('WebSocket connection closed');
+                };
+            }
+        };
+
+        sendButton.onclick = () => {
+            const message = messageInput.value.trim();
+            if (message && socket && socket.readyState === WebSocket.OPEN && currentRecipient) {
+                socket.send(JSON.stringify({ type: 'message', message, to: currentRecipient }));
+                messageInput.value = '';
+            }
+        };
+
+        messageInput.addEventListener('keypress', (event) => {
+            if (event.key === 'Enter') {
+                sendButton.click();
+            }
+        });
+
+        usersSelect.onchange = () => {
+            currentRecipient = usersSelect.value;
+            chat.innerHTML = '';
+            socket.send(JSON.stringify({ type: 'getHistory', with: currentRecipient }));
+        };
+
+        function updateUsers(users) {
+            usersSelect.innerHTML = '<option value="" disabled selected>Select a user</option>';
+            users.forEach(user => {
+                if (user !== userName) {
+                    const option = document.createElement('option');
+                    option.value = user;
+                    option.textContent = user;
+                    usersSelect.appendChild(option);
+                }
+            });
+        }
+
+        function displayChatHistory(messages) {
+            chat.innerHTML = '';
+            messages.forEach(message => {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'message';
+                messageDiv.textContent = `${message.name}: ${message.message}`;
+                chat.appendChild(messageDiv);
+            });
+        }
+    </script>
+</body>
+</html>
